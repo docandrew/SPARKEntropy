@@ -1,0 +1,12 @@
+name = "sparkentropy"
+description = "SPARK implementation of Jitterentropy (NIST SP 800-90B)"
+version = "0.0.1"
+
+authors = ["Jon Andrew"]
+maintainers = ["Jon Andrew <jonfandrew@fastmail.com>"]
+maintainers-logins = ["docandrew"]
+
+[[depends-on]]
+gnatprove = "^14.1.1"
+[[depends-on]]
+gnat = ">=14.2.1"

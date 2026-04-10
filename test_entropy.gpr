@@ -1,0 +1,12 @@
+with "sparkentropy.gpr";
+
+project Test_Entropy is
+   for Source_Dirs use ("tests");
+   for Object_Dir use "obj/tests";
+   for Create_Missing_Dirs use "True";
+   for Main use ("test_entropy.adb", "test_keccak.adb", "dump_entropy.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use ("-g", "-gnatQ");
+   end Compiler;
+end Test_Entropy;

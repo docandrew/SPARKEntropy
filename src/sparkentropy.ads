@@ -1,0 +1,184 @@
+--  SPARKEntropy — SPARK/Ada Jitterentropy Implementation
+--
+--  Generates cryptographically secure random bytes from CPU timing
+--  jitter.  Based on the Jitterentropy algorithm by Stephan Mueller,
+--  designed to comply with NIST SP 800-90B.
+--
+--  No heap allocation.  All state is in the Entropy_State record.
+--  The only platform dependency is the high-resolution timer
+--  (rdtsc on x86, clock_gettime elsewhere).
+--
+--  Usage:
+--    State : SPARKEntropy.Entropy_State;
+--    OK    : Boolean;
+--    Buf   : SPARKEntropy.Byte_Seq (0 .. 31);
+--
+--    SPARKEntropy.Init (State, OK);
+--    if OK then
+--       SPARKEntropy.Generate (State, Buf, OK);
+--    end if;
+
+with Interfaces; use Interfaces;
+
+package SPARKEntropy with
+   SPARK_Mode => On
+is
+   --================================================================
+   --  Basic types
+   --================================================================
+
+   type Byte is new Unsigned_8;
+   type Byte_Seq is array (Natural range <>) of Byte;
+
+   subtype U64 is Unsigned_64;
+
+   --================================================================
+   --  Constants (matching Jitterentropy defaults)
+   --================================================================
+
+   --  Oversampling rate: collect OSR non-stuck samples per output bit
+   Min_OSR : constant := 3;
+   Max_OSR : constant := 20;
+
+   --  Memory noise source buffer: 2^18 = 256 KB
+   Memory_Bits    : constant := 18;
+   Memory_Size    : constant := 2 ** Memory_Bits;
+   Memory_Mask    : constant := Memory_Size - 1;
+   Mem_Block_Size : constant := 128;
+   Mem_Loops      : constant := 128;
+
+   --  Hash noise source
+   Hash_Loops : constant := 1;
+
+   --  Health test windows
+   APT_Window_Size : constant := 512;
+   Lag_Window_Size : constant := 131072;
+   Lag_History     : constant := 8;
+
+   --  Power-up self-test
+   Powerup_Loops : constant := 1024;
+
+   --  Entropy safety factor (FIPS mode, SP 800-90C appendix A.4)
+   Entropy_Safety_Factor : constant := 65;
+
+   --  Output block size (256 bits = 32 bytes)
+   Block_Size : constant := 32;
+
+   --================================================================
+   --  Entropy collector state
+   --================================================================
+
+   --================================================================
+   --  Internal types (visible to child packages)
+   --================================================================
+
+   --  Keccak state (SHAKE-256 sponge)
+   type Keccak_State is array (0 .. 24) of U64;
+   Shake256_Rate : constant := 136;  --  bytes
+
+   subtype Sponge_Pos is Natural range 0 .. Shake256_Rate;
+
+   type Sponge is record
+      S         : Keccak_State := (others => 0);
+      Partial   : Byte_Seq (0 .. Shake256_Rate - 1) := (others => 0);
+      Absorbed  : Sponge_Pos := 0;
+      Squeezed  : Boolean := False;
+   end record;
+
+   --  xoshiro128** PRNG for memory access randomization
+   type Xoshiro_State is record
+      S0, S1, S2, S3 : Unsigned_32 := 0;
+   end record;
+
+   --  Health test state (bounded subtypes prevent overflow)
+   Max_RCT_Count : constant := 30 * Max_OSR;  --  600
+
+   subtype RCT_Counter    is Natural range 0 .. Max_RCT_Count;
+   subtype APT_Counter    is Natural range 0 .. APT_Window_Size;
+   subtype Lag_Counter    is Natural range 0 .. Lag_Window_Size;
+   subtype Lag_Index      is Natural range 0 .. Lag_History - 1;
+
+   type APT_State is record
+      Base_Value  : U64 := 0;
+      Count       : APT_Counter := 0;
+      Window_Pos  : APT_Counter := 0;
+      Active      : Boolean := False;
+   end record;
+
+   type RCT_State is record
+      Count : RCT_Counter := 0;
+   end record;
+
+   type Lag_History_Arr is array (Lag_Index) of U64;
+
+   type Lag_State is record
+      History       : Lag_History_Arr := (others => 0);
+      Pos           : Lag_Index := 0;
+      Best_Lag      : Lag_Index := 0;
+      Predict_Count : Lag_Counter := 0;
+      Consec_Count  : Lag_Counter := 0;
+      Window_Pos    : Lag_Counter := 0;
+   end record;
+
+   --  Memory noise source buffer
+   subtype Mem_Index is Natural range 0 .. Memory_Size - 1;
+   type Mem_Buffer is array (Mem_Index) of Byte;
+
+   subtype OSR_Range is Natural range Min_OSR .. Max_OSR;
+
+   type Entropy_State is record
+      --  Conditioning (SHAKE-256 sponge)
+      Pool : Sponge;
+
+      --  Previous timestamp and derivatives (for stuck test)
+      Prev_Time  : U64 := 0;
+      Prev_Delta : U64 := 0;
+      Prev_Delta2 : U64 := 0;
+
+      --  GCD of all time deltas (computed during init)
+      Timer_GCD : U64 := 0;
+
+      --  Oversampling rate
+      OSR : OSR_Range := Min_OSR;
+
+      --  Health tests
+      APT : APT_State;
+      RCT : RCT_State;
+      Lag : Lag_State;
+      Stuck_Count : Natural := 0;
+
+      --  Memory noise source
+      Mem : Mem_Buffer := (others => 0);
+      Mem_Location : Mem_Index := 0;
+      Xo  : Xoshiro_State;
+
+      --  Initialization flag
+      Initialized : Boolean := False;
+   end record;
+
+   --================================================================
+   --  Public API
+   --================================================================
+
+   --  Initialize the entropy collector.
+   --  Runs power-up self-test (1024 samples), validates timer,
+   --  computes GCD, checks health tests.
+   --  Returns OK = False if the platform timer is unsuitable.
+   procedure Init
+     (State : out Entropy_State;
+      OK    : out Boolean)
+   with Post => (if OK then not State.Pool.Squeezed);
+
+   --  Generate random bytes.
+   --  Output'Length can be any size; internally generates 32-byte
+   --  blocks and truncates the last one.
+   --  Returns OK = False on health test failure.
+   procedure Generate
+     (State  : in out Entropy_State;
+      Output : out Byte_Seq;
+      OK     : out Boolean)
+   with Pre => Output'Length > 0
+               and Output'Last < Natural'Last
+               and not State.Pool.Squeezed;
+
+end SPARKEntropy;

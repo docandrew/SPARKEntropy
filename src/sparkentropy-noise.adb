@@ -7,8 +7,9 @@
 
 pragma Optimize (Off);
 
-with SPARKEntropy.Keccak;
+with SPARKEntropy.Jitter_Permute;
 with SPARKEntropy.Timer;
+with Keccak.Types;
 
 package body SPARKEntropy.Noise with
    SPARK_Mode => On
@@ -44,18 +45,19 @@ is
      (State : in out Entropy_State;
       Loops : Natural)
    is
-      --  Use a scratch Keccak state to generate timing jitter.
-      --  The permutation's execution time varies with input data
-      --  and CPU microarchitectural state.
-      Scratch : Keccak_State := State.Pool.S;
+      --  Use a scratch copy of Jitter_State (NOT the cryptographic
+      --  Pool — libkeccak's Context is opaque). The permutation's
+      --  execution time varies with input data and CPU microarch
+      --  state, which is the entropy we want.
+      Scratch : Keccak_State := State.Jitter_State;
    begin
       for I in 1 .. Loops loop
-         Keccak.Permute (Scratch);
+         Jitter_Permute.Permute (Scratch);
       end loop;
-      --  Mix the result back (not for entropy, just to prevent
-      --  dead code elimination even if pragma Optimize is ignored)
+      --  Mix back into Jitter_State (prevents dead-code elimination).
       for I in Scratch'Range loop
-         State.Pool.S (I) := State.Pool.S (I) xor Scratch (I);
+         State.Jitter_State (I) :=
+            State.Jitter_State (I) xor Scratch (I);
       end loop;
    end Hash_Loop;
 
@@ -148,8 +150,18 @@ is
       State.Prev_Time := T2;
 
       --  Feed the delta into the sponge regardless of stuck status
-      --  (stuck samples still provide some entropy, just not counted)
-      Keccak.Absorb_U64 (State.Pool, Dt);
+      --  (stuck samples still provide some entropy, just not counted).
+      --  Convert the U64 to 8 little-endian bytes, then SHAKE Update.
+      declare
+         Buf : Keccak.Types.Byte_Array (1 .. 8);
+         V   : U64 := Dt;
+      begin
+         for I in Buf'Range loop
+            Buf (I) := Keccak.Types.Byte (V and 16#FF#);
+            V := Shift_Right (V, 8);
+         end loop;
+         SHAKE.SHAKE256.Update (State.Pool, Buf);
+      end;
 
       Dt_Out := Dt;
    end Measure_Jitter;

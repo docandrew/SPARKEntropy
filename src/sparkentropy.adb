@@ -1,29 +1,36 @@
 --  SPARKEntropy main package body.
 --  Implements Init (power-up self-test) and Generate (random bytes).
 
-with SPARKEntropy.Keccak;
 with SPARKEntropy.Noise;
 with SPARKEntropy.Health;
 with SPARKEntropy.Timer;
+with Keccak.Types;
 
 package body SPARKEntropy with
    SPARK_Mode => On
 is
+   --  States is already use-type'd in the spec; no duplicate here.
 
    --================================================================
    --  Squeeze one block from a copy of the sponge
    --================================================================
-
+   --  We extract from a COPY of the pool so the original stays in
+   --  Updating state and can keep absorbing new entropy. libkeccak's
+   --  Extract auto-finalizes on first call.
    procedure Squeeze_Block
-     (Pool  : Sponge;
+     (Pool  : SHAKE.SHAKE256.Context;
       Block : out Byte_Seq)
-   with Pre => not Pool.Squeezed and Block'Last < Natural'Last
+   with Pre => SHAKE.SHAKE256.State_Of (Pool) = SHAKE.SHAKE256.Updating
+               and Block'Last < Natural'Last
    is
-      Copy : Sponge := Pool with Volatile;
+      Copy : SHAKE.SHAKE256.Context := Pool;
+      KBlock : Keccak.Types.Byte_Array (1 .. Block'Length);
    begin
-      Keccak.Finalize (Copy);
-      Keccak.Squeeze (Copy, Block);
-      Copy.S := (others => 0);
+      SHAKE.SHAKE256.Extract (Copy, KBlock);
+      for I in Block'Range loop
+         Block (I) :=
+           Byte (KBlock (KBlock'First + (I - Block'First)));
+      end loop;
    end Squeeze_Block;
 
    --================================================================
@@ -61,7 +68,7 @@ is
       OK := False;
 
       --  Initialize sponge
-      Keccak.Reset (State.Pool);
+      SHAKE.SHAKE256.Init (State.Pool);
 
       --  Seed xoshiro from initial timer reads
       declare
@@ -86,7 +93,9 @@ is
       Health.Reset_Health (State);
 
       for I in Deltas'Range loop
-         pragma Loop_Invariant (not State.Pool.Squeezed);
+         pragma Loop_Invariant
+           (SHAKE.SHAKE256.State_Of (State.Pool) =
+              SHAKE.SHAKE256.Updating);
          Noise.Measure_Jitter (State, Dt, Stuck);
          Deltas (I) := Dt;
          if Stuck and then Stuck_Count < Init_Counter'Last then
@@ -130,7 +139,7 @@ is
 
       --  Reset health tests and sponge for real use
       Health.Reset_Health (State);
-      Keccak.Reset (State.Pool);
+      SHAKE.SHAKE256.Init (State.Pool);
 
       State.Initialized := True;
       OK := True;
@@ -165,12 +174,16 @@ is
       end if;
 
       while Pos <= Output'Last loop
-         pragma Loop_Invariant (not State.Pool.Squeezed);
+         pragma Loop_Invariant
+           (SHAKE.SHAKE256.State_Of (State.Pool) =
+              SHAKE.SHAKE256.Updating);
          pragma Loop_Invariant (Pos >= Output'First and Pos <= Output'Last);
          --  Collect enough non-stuck samples for one block
          Good_Count := 0;
          while Good_Count < Samples_Per_Block loop
-            pragma Loop_Invariant (not State.Pool.Squeezed);
+            pragma Loop_Invariant
+           (SHAKE.SHAKE256.State_Of (State.Pool) =
+              SHAKE.SHAKE256.Updating);
             Noise.Measure_Jitter (State, Dt, Stuck);
             Health.Check_Health (State, Dt, Stuck, Health_Fail);
 

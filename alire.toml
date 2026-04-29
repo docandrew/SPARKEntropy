@@ -10,3 +10,5 @@ maintainers-logins = ["docandrew"]
 gnatprove = "^14.1.1"
 [[depends-on]]
 gnat = ">=14.2.1"
+[[depends-on]]
+libkeccak = "^3.0.0"

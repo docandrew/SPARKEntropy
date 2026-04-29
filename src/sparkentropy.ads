@@ -19,6 +19,14 @@
 --    end if;
 
 with Interfaces; use Interfaces;
+with SHAKE;
+use type SHAKE.SHAKE256.States;
+--  The States enumeration (Updating | Ready_To_Extract | Extracting)
+--  is defined in libkeccak's Keccak.Generic_XOF and instantiated as
+--  SHAKE.SHAKE256.States. We use it in Init's Post and Generate's Pre
+--  to enforce that Generate is only called against an Updating
+--  context (i.e. before any Squeeze has been called). The use-type
+--  brings the predefined "=" operator into direct visibility.
 
 package SPARKEntropy with
    SPARK_Mode => On
@@ -72,18 +80,9 @@ is
    --  Internal types (visible to child packages)
    --================================================================
 
-   --  Keccak state (SHAKE-256 sponge)
+   --  Raw Keccak-f[1600] state (1600 bits = 25 × 64-bit lanes).
+   --  Used ONLY for noise.adb's timing-jitter loop, never for crypto.
    type Keccak_State is array (0 .. 24) of U64;
-   Shake256_Rate : constant := 136;  --  bytes
-
-   subtype Sponge_Pos is Natural range 0 .. Shake256_Rate;
-
-   type Sponge is record
-      S         : Keccak_State := (others => 0);
-      Partial   : Byte_Seq (0 .. Shake256_Rate - 1) := (others => 0);
-      Absorbed  : Sponge_Pos := 0;
-      Squeezed  : Boolean := False;
-   end record;
 
    --  xoshiro128** PRNG for memory access randomization
    type Xoshiro_State is record
@@ -127,8 +126,13 @@ is
    subtype OSR_Range is Natural range Min_OSR .. Max_OSR;
 
    type Entropy_State is record
-      --  Conditioning (SHAKE-256 sponge)
-      Pool : Sponge;
+      --  Conditioning sponge (SHAKE-256 from libkeccak — proven Silver).
+      --  Time deltas are absorbed via Update; Generate extracts blocks.
+      Pool : SHAKE.SHAKE256.Context;
+
+      --  Raw Keccak state used only by noise.adb's Hash_Loop as a
+      --  variable-execution-time CPU stressor for entropy gathering.
+      Jitter_State : Keccak_State := (others => 0);
 
       --  Previous timestamp and derivatives (for stuck test)
       Prev_Time  : U64 := 0;
@@ -167,7 +171,9 @@ is
    procedure Init
      (State : out Entropy_State;
       OK    : out Boolean)
-   with Post => (if OK then not State.Pool.Squeezed);
+   with Post => (if OK then
+                    SHAKE.SHAKE256.State_Of (State.Pool) =
+                      SHAKE.SHAKE256.Updating);
 
    --  Generate random bytes.
    --  Output'Length can be any size; internally generates 32-byte
@@ -179,6 +185,7 @@ is
       OK     : out Boolean)
    with Pre => Output'Length > 0
                and Output'Last < Natural'Last
-               and not State.Pool.Squeezed;
+               and SHAKE.SHAKE256.State_Of (State.Pool) =
+                     SHAKE.SHAKE256.Updating;
 
 end SPARKEntropy;

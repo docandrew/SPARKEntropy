@@ -21,7 +21,12 @@ is
      (Pool  : SHAKE.SHAKE256.Context;
       Block : out Byte_Seq)
    with Pre => SHAKE.SHAKE256.State_Of (Pool) = SHAKE.SHAKE256.Updating
-               and Block'Last < Natural'Last
+               --  The single caller (Generate) passes a 32-byte
+               --  fixed buffer. We bound the length here so the
+               --  prover can show the local KBlock array index
+               --  expression `1 .. Block'Length` fits inside
+               --  Keccak.Types.Index_Number (0 .. Natural'Last - 1).
+               and Block'Length <= 1024
    is
       Copy : SHAKE.SHAKE256.Context := Pool;
       KBlock : Keccak.Types.Byte_Array (1 .. Block'Length);
@@ -53,7 +58,7 @@ is
    --================================================================
 
    procedure Init
-     (State : out Entropy_State;
+     (State : in out Entropy_State;
       OK    : out Boolean)
    is
       Dt     : U64;
@@ -63,8 +68,10 @@ is
       subtype Init_Counter is Natural range 0 .. Powerup_Loops;
       Stuck_Count : Init_Counter := 0;
    begin
-      --  Zero-initialize
-      State := (others => <>);
+      --  State arrives default-initialized (every field has a
+      --  declared default in the Entropy_State record); we update
+      --  individual fields below rather than re-aggregating with
+      --  (others => <>) which SPARK forbids.
       OK := False;
 
       --  Initialize sponge

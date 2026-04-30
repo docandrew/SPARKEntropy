@@ -168,8 +168,14 @@ is
    --  Runs power-up self-test (1024 samples), validates timer,
    --  computes GCD, checks health tests.
    --  Returns OK = False if the platform timer is unsuitable.
+   --
+   --  State is `in out` (not `out`) so the caller's default-
+   --  initialized declaration carries the type's declared field
+   --  defaults through to Init's body. SPARK forbids
+   --  `(others => <>)` aggregates in `out`-only contexts; relying
+   --  on the existing field defaults is the equivalent.
    procedure Init
-     (State : out Entropy_State;
+     (State : in out Entropy_State;
       OK    : out Boolean)
    with Post => (if OK then
                     SHAKE.SHAKE256.State_Of (State.Pool) =

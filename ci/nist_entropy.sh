@@ -52,6 +52,7 @@ make -C "$NIST_DIR/cpp" \
 echo "== building SPARKEntropy dump tool =="
 (
   cd "$ROOT"
+  alr -n --no-tty build
   alr -n --no-tty exec -- gprbuild -P test_entropy.gpr
 )
 

@@ -1,4 +1,4 @@
-with "libkeccak.gpr";
+with "config/sparkentropy_config.gpr";
 
 project SPARKEntropy is
    type Host_Arch_Type is ("x86_64", "aarch64", "unsupported");

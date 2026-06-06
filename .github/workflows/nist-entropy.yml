@@ -1,6 +1,11 @@
 name: NIST Entropy
 
 on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
   workflow_dispatch:
     inputs:
       bytes:
@@ -30,6 +35,6 @@ jobs:
 
       - name: NIST SP 800-90B entropy assessment
         env:
-          NIST_MIN_BITS_PER_BYTE: ${{ inputs.min_bits_per_byte }}
+          NIST_MIN_BITS_PER_BYTE: ${{ inputs.min_bits_per_byte || '7.0' }}
           NIST_REF: 87c104d0ed4cbc96103e7b8b38d6f2c7e0a6b289
-        run: nix develop --command bash ci/nist_entropy.sh "${{ inputs.bytes }}"
+        run: nix develop --command bash ci/nist_entropy.sh "${{ inputs.bytes || '1048576' }}"

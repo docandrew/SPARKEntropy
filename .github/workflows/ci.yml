@@ -33,5 +33,11 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@v16
 
+      - uses: alire-project/setup-alire@v5
+        if: matrix.arch == 'aarch64'
+        with:
+          version: "2.1.0"
+          toolchain: "gnat_native gprbuild"
+
       - name: Build and smoke test
         run: nix develop --command bash ci/check.sh

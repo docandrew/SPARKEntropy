@@ -22,11 +22,15 @@
             inherit system;
             config.allowUnsupportedSystem = true;
           };
+          alirePackages =
+            if system == "x86_64-linux" then
+              [ pkgs.alire ]
+            else
+              [ ];
         in
         {
           default = pkgs.mkShell {
-            packages = with pkgs; [
-              alire
+            packages = alirePackages ++ (with pkgs; [
               bash
               bzip2
               coreutils
@@ -43,7 +47,7 @@
               openssl
               pkg-config
               which
-            ];
+            ]);
 
             shellHook = ''
               echo "SPARKEntropy dev shell: use ci/check.sh for the reproducible CI lane."

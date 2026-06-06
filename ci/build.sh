@@ -5,10 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 export ALR_NON_INTERACTIVE=1
+export NO_COLOR=1
 
 echo "== default build =="
-alr build
+alr -n --no-tty build
 
 echo "== test build =="
-alr exec -- gprbuild -P test_entropy.gpr
-
+alr -n --no-tty exec -- gprbuild -P test_entropy.gpr

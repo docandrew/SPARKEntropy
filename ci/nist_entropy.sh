@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export ALR_NON_INTERACTIVE=1
+export NO_COLOR=1
+
 WORK="${TMPDIR:-/tmp}/sparkentropy-nist"
 NIST_REPO="${NIST_REPO:-https://github.com/usnistgov/SP800-90B_EntropyAssessment.git}"
 NIST_REF="${NIST_REF:-87c104d0ed4cbc96103e7b8b38d6f2c7e0a6b289}"
@@ -41,7 +44,7 @@ make -C "$NIST_DIR/cpp" \
 echo "== building SPARKEntropy dump tool =="
 (
   cd "$ROOT"
-  alr exec -- gprbuild -P test_entropy.gpr
+  alr -n --no-tty exec -- gprbuild -P test_entropy.gpr
 )
 
 echo "== generating $BYTES bytes =="

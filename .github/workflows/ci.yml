@@ -13,6 +13,9 @@ permissions:
 
 jobs:
   build-test:
+    env:
+      ALR_NON_INTERACTIVE: "1"
+      NO_COLOR: "1"
     strategy:
       fail-fast: false
       matrix:

@@ -64,7 +64,7 @@ is
       Dt     : U64;
       Stuck  : Boolean;
       G      : U64 := 0;
-      Deltas : array (0 .. Powerup_Loops - 1) of U64;
+      Deltas : array (0 .. Powerup_Loops - 1) of U64 := (others => 0);
       subtype Init_Counter is Natural range 0 .. Powerup_Loops;
       Stuck_Count : Init_Counter := 0;
       Health_Fail : Boolean;

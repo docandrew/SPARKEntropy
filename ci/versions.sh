@@ -2,5 +2,4 @@
 set -euo pipefail
 
 echo "== tool versions =="
-alr --version
-
+alr -n --no-tty --version

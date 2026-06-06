@@ -17,6 +17,9 @@ permissions:
 
 jobs:
   nist-entropy:
+    env:
+      ALR_NON_INTERACTIVE: "1"
+      NO_COLOR: "1"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

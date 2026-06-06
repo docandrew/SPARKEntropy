@@ -16,14 +16,17 @@ jobs:
     env:
       ALR_NON_INTERACTIVE: "1"
       NO_COLOR: "1"
+      SPARKENTROPY_HOST_ARCH: ${{ matrix.host_arch }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: x86_64
             runner: ubuntu-latest
+            host_arch: x86_64
           - arch: aarch64
             runner: ubuntu-24.04-arm
+            host_arch: aarch64
     name: build-test (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     steps:

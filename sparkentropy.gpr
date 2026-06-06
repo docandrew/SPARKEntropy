@@ -1,9 +1,13 @@
-with "config/sparkentropy_config.gpr";
+with "libkeccak.gpr";
 
 project SPARKEntropy is
+   type Host_Arch_Type is ("x86_64", "aarch64", "unsupported");
+   Host_Arch : Host_Arch_Type :=
+     external ("SPARKENTROPY_HOST_ARCH", "x86_64");
+
    Timer_Source_Dirs := ("src/timer/x86_64");
 
-   case Sparkentropy_Config.Alire_Host_Arch is
+   case Host_Arch is
       when "aarch64" =>
          Timer_Source_Dirs := ("src/timer/aarch64");
       when "x86_64" =>

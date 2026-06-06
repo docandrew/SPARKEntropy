@@ -25,6 +25,7 @@ jobs:
     env:
       ALR_NON_INTERACTIVE: "1"
       NO_COLOR: "1"
+      SPARKENTROPY_HOST_ARCH: x86_64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

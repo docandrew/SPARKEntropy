@@ -67,12 +67,14 @@ is
       Deltas : array (0 .. Powerup_Loops - 1) of U64;
       subtype Init_Counter is Natural range 0 .. Powerup_Loops;
       Stuck_Count : Init_Counter := 0;
+      Health_Fail : Boolean;
    begin
       --  State arrives default-initialized (every field has a
       --  declared default in the Entropy_State record); we update
       --  individual fields below rather than re-aggregating with
       --  (others => <>) which SPARK forbids.
       OK := False;
+      State.Initialized := False;
 
       --  Initialize sponge
       SHAKE.SHAKE256.Init (State.Pool);
@@ -104,6 +106,10 @@ is
            (SHAKE.SHAKE256.State_Of (State.Pool) =
               SHAKE.SHAKE256.Updating);
          Noise.Measure_Jitter (State, Dt, Stuck);
+         Health.Check_Health (State, Dt, Stuck, Health_Fail);
+         if Health_Fail then
+            return;
+         end if;
          Deltas (I) := Dt;
          if Stuck and then Stuck_Count < Init_Counter'Last then
             Stuck_Count := Stuck_Count + 1;

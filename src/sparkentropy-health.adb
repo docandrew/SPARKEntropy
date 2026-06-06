@@ -69,7 +69,7 @@ is
          State.APT.Count := State.APT.Count + 1;
       end if;
 
-      if State.APT.Window_Pos >= APT_Window_Size then
+      if State.APT.Window_Pos = APT_Window_Size then
          Failed := State.APT.Count >= APT_Cutoffs (State.OSR);
          State.APT.Active := False;
       end if;
@@ -86,6 +86,9 @@ is
       Dt     : U64;
       Failed : out Boolean)
    is
+      Initial_Pool_State : constant SHAKE.SHAKE256.States :=
+         SHAKE.SHAKE256.State_Of (State.Pool)
+      with Ghost;
       Best_Diff : U64 := U64'Last;
       Diff      : U64;
    begin
@@ -124,12 +127,15 @@ is
          State.Lag.Window_Pos := State.Lag.Window_Pos + 1;
       end if;
 
-      if State.Lag.Window_Pos >= Lag_Window_Size then
+      if State.Lag.Window_Pos = Lag_Window_Size then
          Failed := State.Lag.Predict_Count >= Lag_Global_Cutoff;
          State.Lag.Predict_Count := 0;
          State.Lag.Consec_Count := 0;
          State.Lag.Window_Pos := 0;
       end if;
+
+      pragma Assert
+        (SHAKE.SHAKE256.State_Of (State.Pool) = Initial_Pool_State);
    end Update_Lag;
 
    --================================================================

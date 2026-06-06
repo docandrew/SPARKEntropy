@@ -1,0 +1,24 @@
+SPARKEntropy
+============
+
+SPARKEntropy is licensed under the BSD 3-Clause License. See LICENSE.
+
+Third-party attributions
+------------------------
+
+Jitterentropy
+
+  SPARKEntropy is based on the Jitterentropy CPU-jitter entropy collection
+  algorithm by Stephan Mueller. This crate is an independent SPARK/Ada
+  implementation and does not incorporate Jitterentropy library source code.
+
+libkeccak
+
+  SPARKEntropy depends on libkeccak for the SHAKE-256 conditioning sponge.
+  libkeccak is distributed under the BSD 3-Clause License by Daniel King.
+
+NIST SP 800-90B EntropyAssessment
+
+  The CI entropy-assessment workflow can build and run the NIST SP 800-90B
+  EntropyAssessment tool suite as an external test tool. The NIST tool source
+  is not incorporated into this crate.

@@ -1,7 +1,18 @@
-with "libkeccak.gpr";
+with "config/sparkentropy_config.gpr";
 
 project SPARKEntropy is
-   for Source_Dirs use ("src");
+   Timer_Source_Dirs := ("src/timer/x86_64");
+
+   case Sparkentropy_Config.Alire_Host_Arch is
+      when "aarch64" =>
+         Timer_Source_Dirs := ("src/timer/aarch64");
+      when "x86_64" =>
+         Timer_Source_Dirs := ("src/timer/x86_64");
+      when others =>
+         Timer_Source_Dirs := ("src/timer/unsupported");
+   end case;
+
+   for Source_Dirs use ("src") & Timer_Source_Dirs;
    for Object_Dir use "obj";
    for Create_Missing_Dirs use "True";
 

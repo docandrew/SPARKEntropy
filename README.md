@@ -24,14 +24,25 @@ the noise source — there is no separate "raw output" surface.
    stays in `Updating` state for the lifetime of the connection.
 
 Health tests (NIST SP 800-90B §4.4 RCT, APT, and a lag predictor)
-run on every sample and force a re-init on persistent failure.
+run on every sample. `Generate` returns `OK := False` on health-test failure;
+callers should reinitialize the entropy state before retrying.
 
 `SPARKEntropy.Jitter_Permute` is a small in-house Keccak-f[1600]
 permutation kept *only* as the variable-time CPU stressor in
 `Hash_Loop`.  All cryptographically meaningful Keccak operations go
 through libkeccak.
 
-## Building
+## Platform Support
+
+SPARKEntropy currently supports Linux on `x86_64` and `aarch64`.
+
+The timer backend is architecture-specific:
+
+- `x86_64`: `rdtsc`
+- `aarch64`: `CNTVCT_EL0`
+
+Other architectures intentionally fail at compile time until a timer backend
+with suitable resolution is added and assessed.
 
 ```
 alr build
@@ -89,6 +100,17 @@ alr exec -- gprbuild -P test_entropy.gpr
 $NIST/cpp/ea_iid     -i -a entropy.bin 8      # IID estimator
 $NIST/cpp/ea_non_iid -i -a entropy.bin 8      # non-IID (conservative) estimator
 ```
+
+With Nix, the tool build and entropy assessment can be run as:
+
+```
+nix develop --command bash ci/nist_entropy.sh
+```
+
+The reproducible assessment gate requires at least 1,000,000 bytes, passing
+IID statistical tests, and assessed IID/non-IID min-entropy of at least
+7.0 bits/byte by default. Override the threshold with
+`NIST_MIN_BITS_PER_BYTE` if needed.
 
 `-i` is the initial entropy-estimation pass; `-a` reports all
 estimators; `8` is the symbol size in bits.
@@ -182,7 +204,7 @@ at SPARK Silver (absence of run-time errors).
 
 ## License
 
-BSD-2-Clause.  See `LICENSE`.
+BSD-3-Clause.  See `LICENSE`.
 
 Embeds NIST test vectors and references the NIST SP 800-90B
 EntropyAssessment tool suite, which is public-domain

@@ -17,7 +17,7 @@ procedure Dump_Entropy is
 
    --  Default: 1 MB (1048576 bytes), enough for NIST testing
    Total : Natural := 1048576;
-   Buf   : Byte_Seq (0 .. 1023);
+   Chunk_Size : constant Natural := 1024;
    Written : Natural := 0;
 
    F : SIO.File_Type;
@@ -50,7 +50,7 @@ begin
    while Written < Total loop
       declare
          Chunk : constant Natural :=
-            Natural'Min (Buf'Length, Total - Written);
+            Natural'Min (Chunk_Size, Total - Written);
          Raw : Byte_Seq (0 .. Chunk - 1);
          B   : Stream_Element_Array (1 .. Stream_Element_Offset (Chunk));
       begin

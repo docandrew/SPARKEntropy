@@ -1,0 +1,14 @@
+alire/
+config/
+obj/
+
+*.ali
+*.bexch
+*.cswi
+*.o
+*.stderr
+*.stdout
+
+entropy.bin
+restart.bin
+

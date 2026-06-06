@@ -1,0 +1,32 @@
+name: NIST Entropy
+
+on:
+  workflow_dispatch:
+    inputs:
+      bytes:
+        description: Number of entropy bytes to assess
+        required: true
+        default: "1048576"
+      min_bits_per_byte:
+        description: Minimum accepted assessed min-entropy
+        required: true
+        default: "7.0"
+
+permissions:
+  contents: read
+
+jobs:
+  nist-entropy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: NIST SP 800-90B entropy assessment
+        env:
+          NIST_MIN_BITS_PER_BYTE: ${{ inputs.min_bits_per_byte }}
+          NIST_REF: 87c104d0ed4cbc96103e7b8b38d6f2c7e0a6b289
+        run: nix develop --command bash ci/nist_entropy.sh "${{ inputs.bytes }}"

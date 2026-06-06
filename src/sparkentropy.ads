@@ -6,7 +6,7 @@
 --
 --  No heap allocation.  All state is in the Entropy_State record.
 --  The only platform dependency is the high-resolution timer
---  (rdtsc on x86, clock_gettime elsewhere).
+--  (rdtsc on x86/x86_64, CNTVCT_EL0 on AArch64).
 --
 --  Usage:
 --    State : SPARKEntropy.Entropy_State;

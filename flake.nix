@@ -18,7 +18,10 @@
       devShells = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnsupportedSystem = true;
+          };
         in
         {
           default = pkgs.mkShell {

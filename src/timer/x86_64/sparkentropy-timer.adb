@@ -1,7 +1,4 @@
 --  Timer implementation for x86/x86_64.
---
---  Uses rdtsc via inline assembly. This is the one SPARK_Mode Off unit in
---  the library.
 
 with System.Machine_Code; use System.Machine_Code;
 

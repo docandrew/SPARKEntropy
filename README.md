@@ -2,13 +2,12 @@
 
 A SPARK/Ada implementation of CPU-jitter–based entropy collection,
 following [NIST SP 800-90B](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-90B.pdf).
-The output bytes are suitable as a `Random_Bytes_Fn` for `sparktls`, the
-`sparktls_cli` cert/CSR/key generators, and any other consumer that needs
-cryptographically strong randomness without relying on `/dev/urandom`.
 
 This crate is a port of the FIPS-certified userspace
 (Jitterentropy)[https://github.com/smuellerDD/jitterentropy-library] library but
-is NOT FIPS-certified.
+is NOT FIPS-certified. It is intended for evaluation and research purposes, and
+should not be treated as a drop-in replacement for a certified entropy source
+in production use.
 
 ## Architecture
 

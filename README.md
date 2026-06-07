@@ -1,36 +1,19 @@
 # SPARKEntropy
 
 A SPARK/Ada implementation of CPU-jitter–based entropy collection,
-following NIST SP 800-90B.  The output bytes are suitable as a
-`Random_Bytes_Fn` for `sparktls`, the `sparktls_cli` cert/CSR/key
-generators, and any other consumer that needs cryptographically
-strong randomness without relying on `/dev/urandom`.
+following [NIST SP 800-90B](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-90B.pdf).
+The output bytes are suitable as a `Random_Bytes_Fn` for `sparktls`, the
+`sparktls_cli` cert/CSR/key generators, and any other consumer that needs
+cryptographically strong randomness without relying on `/dev/urandom`.
+
+This crate is a port of the FIPS-certified userspace
+(Jitterentropy)[https://github.com/smuellerDD/jitterentropy-library] library but
+is NOT FIPS-certified.
 
 ## Architecture
 
-The pipeline has two stages.  From the perspective of a consumer
-calling `Generate (State, Output, OK)`, both stages together *are*
-the noise source — there is no separate "raw output" surface.
-
-1. **Noise**.  `SPARKEntropy.Noise` repeatedly times a deliberately
-   variable CPU workload (Keccak-f[1600] permutations on a scratch
-   `Jitter_State`, plus pseudo-random memory accesses to perturb the
-   cache).  Each iteration's wall-time delta `Dt` is a 64-bit
-   timestamp difference; the lowest bits carry the jitter signal.
-2. **Conditioning**.  Every `Dt` is folded into a SHAKE-256 sponge
-   (`SHAKE.SHAKE256` from the [damaki/libkeccak](https://github.com/damaki/libkeccak)
-   Alire crate).  `Generate` extracts from a *copy* of the sponge so
-   the original keeps absorbing future jitter — the live sponge
-   stays in `Updating` state for the lifetime of the connection.
-
-Health tests (NIST SP 800-90B §4.4 RCT, APT, and a lag predictor)
-run on every sample. `Generate` returns `OK := False` on health-test failure;
-callers should reinitialize the entropy state before retrying.
-
-`SPARKEntropy.Jitter_Permute` is a small in-house Keccak-f[1600]
-permutation kept *only* as the variable-time CPU stressor in
-`Hash_Loop`.  All cryptographically meaningful Keccak operations go
-through libkeccak.
+See the original (Jitterentropy)[https://github.com/smuellerDD/jitterentropy-library]
+library for a description of the entropy source, conditioning and health tests.
 
 ## Platform Support
 
@@ -40,9 +23,6 @@ The timer backend is architecture-specific:
 
 - `x86_64`: `rdtsc`
 - `aarch64`: `CNTVCT_EL0`
-
-Other architectures intentionally fail at compile time until a timer backend
-with suitable resolution is added and assessed.
 
 ```
 alr build
@@ -79,7 +59,8 @@ You should see `Init OK` followed by five 32-byte hex dumps and
 `tests/dump_entropy.adb` writes a binary file of `Generate()` output
 that can be fed to NIST's
 [SP 800-90B EntropyAssessment](https://github.com/usnistgov/SP800-90B_EntropyAssessment)
-tools (`ea_iid`, `ea_non_iid`, `ea_restart`).
+tools (`ea_iid`, `ea_non_iid`, `ea_restart`). See the `NIST` CI workflow for
+an example of how to run the assessment and interpret results.
 
 ### Building the NIST tools (Ubuntu/Debian)
 
@@ -92,9 +73,9 @@ cd SP800-90B_EntropyAssessment/cpp && make
 
 ### Running the assessments
 
-From the sparkentropy directory:
+From the `sparkentropy` directory:
 
-```
+```shell
 alr exec -- gprbuild -P test_entropy.gpr
 ./obj/tests/dump_entropy                      # writes 1 MB to entropy.bin
 $NIST/cpp/ea_iid     -i -a entropy.bin 8      # IID estimator
@@ -103,7 +84,7 @@ $NIST/cpp/ea_non_iid -i -a entropy.bin 8      # non-IID (conservative) estimator
 
 With Nix, the tool build and entropy assessment can be run as:
 
-```
+```shell
 nix develop --command bash ci/nist_entropy.sh
 ```
 
@@ -115,7 +96,7 @@ IID statistical tests, and assessed IID/non-IID min-entropy of at least
 `-i` is the initial entropy-estimation pass; `-a` reports all
 estimators; `8` is the symbol size in bits.
 
-### Reference results (libkeccak swap, 2026-04-29)
+### Reference results
 
 Hardware: Linux 6.8 x86_64.  1 MB sample.
 
@@ -183,24 +164,9 @@ recommended regression test for the noise source.
 
 ## Formal verification
 
-Run `alr gnatprove --mode=prove --level=1 -j4`.  As of the libkeccak
-swap (2026-04-29):
-
-| Category              | Total | Flow / Proved | Justified | Unproved |
-|-----------------------|-------|---------------|-----------|----------|
-| Data Dependencies     | 899   | 899           | .         | 0        |
-| Flow Dependencies     | 371   | 371           | .         | 0        |
-| Initialization        | 5106  | 5028          | 78        | 0        |
-| Non-Aliasing          | 232   | 232           | .         | 0        |
-| Run-time Checks       | 10541 | 10541         | .         | **0**    |
-| Assertions            | 1415  | 1415          | .         | **0**    |
-| Functional Contracts  | 2189  | 2189          | .         | **0**    |
-| Termination           | 353   | 353           | .         | **0**    |
-| **Total**             | 21106 | 21028         | 78        | **0**    |
-
-The 78 justified checks are pre-existing libkeccak annotations.
-sparkentropy itself contributes zero unproved or justified checks
-at SPARK Silver (absence of run-time errors).
+This project is SPARK "silver" verified for absence of runtime errors (AoRTE).
+This should not be construed as a formal proof of entropy properties or
+functional correctness.
 
 ## License
 

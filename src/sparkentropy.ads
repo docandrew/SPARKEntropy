@@ -1,8 +1,7 @@
 --  SPARKEntropy — SPARK/Ada Jitterentropy Implementation
 --
---  Generates cryptographically secure random bytes from CPU timing
---  jitter.  Based on the Jitterentropy algorithm by Stephan Mueller,
---  designed to comply with NIST SP 800-90B.
+--  CSPRNG using CPU timing jitter. Based on the Jitterentropy algorithm by
+--  Stephan Mueller.
 --
 --  No heap allocation.  All state is in the Entropy_State record.
 --  The only platform dependency is the high-resolution timer
@@ -21,12 +20,6 @@
 with Interfaces; use Interfaces;
 with SHAKE;
 use type SHAKE.SHAKE256.States;
---  The States enumeration (Updating | Ready_To_Extract | Extracting)
---  is defined in libkeccak's Keccak.Generic_XOF and instantiated as
---  SHAKE.SHAKE256.States. We use it in Init's Post and Generate's Pre
---  to enforce that Generate is only called against an Updating
---  context (i.e. before any Squeeze has been called). The use-type
---  brings the predefined "=" operator into direct visibility.
 
 package SPARKEntropy with
    SPARK_Mode => On
@@ -77,7 +70,7 @@ is
    ----------------------------------------------------------------------------
 
    ----------------------------------------------------------------------------
-   --  Internal types (visible to child packages)
+   --  Internal types
    ----------------------------------------------------------------------------
 
    --  Raw Keccak-f[1600] state (1600 bits = 25 × 64-bit lanes).
@@ -126,7 +119,7 @@ is
    subtype OSR_Range is Natural range Min_OSR .. Max_OSR;
 
    type Entropy_State is record
-      --  Conditioning sponge (SHAKE-256 from libkeccak — proven Silver).
+      --  Conditioning sponge (SHAKE-256 from libkeccak)
       --  Time deltas are absorbed via Update; Generate extracts blocks.
       Pool : SHAKE.SHAKE256.Context;
 

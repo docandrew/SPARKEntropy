@@ -4,8 +4,12 @@
 builds the library, builds the test harnesses, and runs the quick functional
 smoke test.
 
-Formal proof and NIST SP 800-90B entropy assessment runs are intentionally not
-part of default hosted CI.
+Formal proof is intentionally not part of default hosted CI.
+
+The NIST SP 800-90B entropy assessment has its own hosted workflow on pull
+requests, pushes to main/master, and manual dispatch. It is separated from the
+quick build/smoke lane because it downloads and builds the NIST assessment
+tooling and processes a larger sample.
 
 To build and run the NIST SP 800-90B entropy assessment tools inside the Nix
 environment:

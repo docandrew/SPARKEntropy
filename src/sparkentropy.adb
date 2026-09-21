@@ -201,7 +201,13 @@ is
             Health.Check_Health (State, Dt, Stuck, Health_Fail);
 
             if Health_Fail then
-               return;  --  Health test failed
+               --  Health test failed: hand back no partial output and
+               --  latch the generator off until it is initialised again.
+               --  Output was zeroed on entry; the blocks copied so far
+               --  are overwritten here.
+               Output := (others => 0);
+               State.Initialized := False;
+               return;
             end if;
 
             if not Stuck then

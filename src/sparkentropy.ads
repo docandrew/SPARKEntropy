@@ -177,7 +177,9 @@ is
    --  Generate random bytes.
    --  Output'Length can be any size; internally generates 32-byte
    --  blocks and truncates the last one.
-   --  Returns OK = False on health test failure.
+   --  Returns OK = False on health test failure; Output is then all
+   --  zero and the generator is latched off (Initialized cleared) until
+   --  Init is called again.
    procedure Generate
      (State  : in out Entropy_State;
       Output : out Byte_Seq;

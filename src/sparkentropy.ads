@@ -162,6 +162,13 @@ is
    --  computes GCD, checks health tests.
    --  Returns OK = False if the platform timer is unsuitable.
    --
+   --  OSR is the oversampling rate for this platform: the number of
+   --  non-stuck time deltas collected per output bit, on the heuristic
+   --  that each delta carries at least 1/OSR bit of min-entropy. The
+   --  right value comes from the raw-delta assessment (ci/nist_entropy.sh,
+   --  tests/dump_raw.adb): OSR = ceiling (1 / H_min), never below Min_OSR.
+   --  The health-test cutoffs scale with it.
+   --
    --  State is `in out` (not `out`) so the caller's default-
    --  initialized declaration carries the type's declared field
    --  defaults through to Init's body. SPARK forbids
@@ -169,7 +176,8 @@ is
    --  on the existing field defaults is the equivalent.
    procedure Init
      (State : in out Entropy_State;
-      OK    : out Boolean)
+      OK    : out Boolean;
+      OSR   : OSR_Range := Min_OSR)
    with Post => (if OK then
                     SHAKE.SHAKE256.State_Of (State.Pool) =
                       SHAKE.SHAKE256.Updating);

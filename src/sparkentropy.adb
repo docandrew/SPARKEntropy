@@ -59,7 +59,8 @@ is
 
    procedure Init
      (State : in out Entropy_State;
-      OK    : out Boolean)
+      OK    : out Boolean;
+      OSR   : OSR_Range := Min_OSR)
    is
       Dt     : U64;
       Stuck  : Boolean;
@@ -75,6 +76,7 @@ is
       --  (others => <>) which SPARK forbids.
       OK := False;
       State.Initialized := False;
+      State.OSR := OSR;   --  before Reset_Health: the cutoffs scale with it
 
       --  Initialize sponge
       SHAKE.SHAKE256.Init (State.Pool);

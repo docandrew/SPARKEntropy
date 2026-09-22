@@ -37,7 +37,14 @@ is
    --  Constants (matching Jitterentropy defaults)
    ----------------------------------------------------------------------------
 
-   --  Oversampling rate: collect OSR non-stuck samples per output bit
+   --  Oversampling rate (OSR): the number of non-stuck time deltas
+   --  absorbed per output bit. The generator credits each delta with
+   --  1/OSR bit of min-entropy, whatever the platform actually delivers,
+   --  and fills a 256-bit block from (256 + Entropy_Safety_Factor) * OSR
+   --  deltas, so a noise source that meets 1/OSR per delta gives
+   --  full-entropy output. Init takes the value; the bounds are
+   --  jitterentropy's (JENT_MIN_OSR 3, and 20 as the largest rate at
+   --  which it will still run). Raising OSR costs output speed only.
    Min_OSR : constant := 3;
    Max_OSR : constant := 20;
 
@@ -135,7 +142,7 @@ is
       --  GCD of all time deltas (computed during init)
       Timer_GCD : U64 := 0;
 
-      --  Oversampling rate
+      --  Oversampling rate, set by Init (see Min_OSR)
       OSR : OSR_Range := Min_OSR;
 
       --  Health tests
@@ -162,12 +169,16 @@ is
    --  computes GCD, checks health tests.
    --  Returns OK = False if the platform timer is unsuitable.
    --
-   --  OSR is the oversampling rate for this platform: the number of
-   --  non-stuck time deltas collected per output bit, on the heuristic
-   --  that each delta carries at least 1/OSR bit of min-entropy. The
-   --  right value comes from the raw-delta assessment (ci/nist_entropy.sh,
-   --  tests/dump_raw.adb): OSR = ceiling (1 / H_min), never below Min_OSR.
-   --  The health-test cutoffs scale with it.
+   --  OSR is the oversampling rate for this platform (see Min_OSR): the
+   --  claim that each time delta carries at least 1/OSR bit of
+   --  min-entropy. The right value comes from the SP 800-90B assessment
+   --  of the raw deltas (ci/nist_entropy.sh, tests/dump_raw.adb): the
+   --  measured min-entropy per delta must be at least 1/OSR, so
+   --  OSR = ceiling (1 / H_min), never below Min_OSR. A platform whose
+   --  timer is coarse or whose execution is too regular for the default
+   --  needs a larger OSR, not a lower pass mark; the cost is output
+   --  speed. The health-test cutoffs (RCT, APT, lag predictor) are
+   --  calibrated to the same 1/OSR assumption and scale with it.
    --
    --  State is `in out` (not `out`) so the caller's default-
    --  initialized declaration carries the type's declared field

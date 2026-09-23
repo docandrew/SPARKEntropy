@@ -142,6 +142,32 @@ carry their own OSR, chosen from the same measurement.
 Re-run the assessment after any change to `SPARKEntropy.Noise`,
 `SPARKEntropy.Health`, the timer, or the libkeccak version.
 
+## Health tests and failure handling
+
+Every delta passes the Repetition Count Test, the Adaptive Proportion
+Test and jitterentropy's lag predictor test before it counts. Each test
+has the two failure tiers SP 800-90B section 4.3 allows, with
+jitterentropy's cutoffs (RCT 30 x OSR and 60 x OSR; APT and lag
+predictor from its per-OSR tables), so the verdict of one delta is
+`Healthy`, `Intermittent` (false-positive probability 2^-30 per test,
+expected now and then from a healthy source) or `Permanent` (2^-60).
+
+- Intermittent: `Generate` discards the pool, re-runs the 1024-sample
+  start-up tests at the next oversampling rate, and starts the request
+  over. The caller sees `OK = True`; `Last_Health` reports `Intermittent`
+  and `Intermittent_Resets` counts the recoveries. `Init` retries its
+  start-up the same way.
+- Permanent, a second intermittent failure in one request, a failed
+  retest, or an oversampling rate already at `Max_OSR`: the generator
+  latches off. `Generate` returns `OK = False` with an all-zero
+  `Output`, and only a new `Init` brings it back. A consumer that cannot
+  see the flag (SPARKTLS's `Random_Bytes_Fn`) detects the all-zero
+  output and reports it through `Config.On_Entropy_Failure`.
+
+This is the behaviour jitterentropy's ESV-validated deployments
+document: intermittent failures reset the source, permanent ones stop
+it.
+
 ## Formal verification
 
 This project is SPARK "silver" verified for absence of runtime errors (AoRTE).

@@ -89,8 +89,9 @@ is
       S0, S1, S2, S3 : Unsigned_32 := 0;
    end record;
 
-   --  Health test state (bounded subtypes prevent overflow)
-   Max_RCT_Count : constant := 30 * Max_OSR;  --  600
+   --  Health test state (bounded subtypes prevent overflow). The RCT
+   --  counter must reach the permanent cutoff, 60 * OSR (see Health).
+   Max_RCT_Count : constant := 60 * Max_OSR;  --  1200
 
    subtype RCT_Counter    is Natural range 0 .. Max_RCT_Count;
    subtype APT_Counter    is Natural range 0 .. APT_Window_Size;
@@ -109,15 +110,30 @@ is
    end record;
 
    type Lag_History_Arr is array (Lag_Index) of U64;
+   type Lag_Scoreboard is array (Lag_Index) of Lag_Counter;
 
+   --  Lag predictor (jitterentropy's): Lag_History predictors, each
+   --  guessing "the delta Lag_History deltas ago repeats"; Best is the
+   --  one with the most correct guesses so far, and its guess is the
+   --  prediction tested against each new delta. Observations counts the
+   --  deltas seen in the current window, Success_Count the correct
+   --  predictions in it, Success_Run the current streak.
    type Lag_State is record
       History       : Lag_History_Arr := (others => 0);
-      Pos           : Lag_Index := 0;
-      Best_Lag      : Lag_Index := 0;
-      Predict_Count : Lag_Counter := 0;
-      Consec_Count  : Lag_Counter := 0;
-      Window_Pos    : Lag_Counter := 0;
+      Scoreboard    : Lag_Scoreboard := (others => 0);
+      Best          : Lag_Index := 0;
+      Observations  : Lag_Counter := 0;
+      Success_Count : Lag_Counter := 0;
+      Success_Run   : Lag_Counter := 0;
    end record;
+
+   --  Verdict of the health tests on one delta (SP 800-90B 4.3 allows
+   --  two failure levels). Intermittent: false-positive probability
+   --  2^-30 per test, expected now and then from a healthy source; the
+   --  generator discards its pool and re-runs the start-up tests at the
+   --  next oversampling rate. Permanent: 2^-60; the generator latches
+   --  off until Init is called again.
+   type Health_Status is (Healthy, Intermittent, Permanent);
 
    --  Memory noise source buffer
    subtype Mem_Index is Natural range 0 .. Memory_Size - 1;
@@ -158,7 +174,28 @@ is
 
       --  Initialization flag
       Initialized : Boolean := False;
+
+      --  Health bookkeeping for the application (see Last_Health,
+      --  Intermittent_Resets). Resets is never cleared by Init.
+      Last_Health : Health_Status := Healthy;
+      Resets      : Natural := 0;
    end record;
+
+   --  Verdict of the most recent health event: Healthy, Intermittent
+   --  (a reset and start-up retest happened, output continued), or
+   --  Permanent (latched off; Generate returns OK = False).
+   function Last_Health (State : Entropy_State) return Health_Status
+   is (State.Last_Health);
+
+   --  Intermittent failures recovered from since the state was created
+   --  (each one raised the oversampling rate by one). Saturates.
+   function Intermittent_Resets (State : Entropy_State) return Natural
+   is (State.Resets);
+
+   --  The oversampling rate in force (the Init argument, raised by one
+   --  per intermittent recovery).
+   function Current_OSR (State : Entropy_State) return OSR_Range
+   is (State.OSR);
 
    ----------------------------------------------------------------------------
    --  Public API
@@ -167,7 +204,10 @@ is
    --  Initialize the entropy collector.
    --  Runs power-up self-test (1024 samples), validates timer,
    --  computes GCD, checks health tests.
-   --  Returns OK = False if the platform timer is unsuitable.
+   --  Returns OK = False if the platform timer is unsuitable or the
+   --  start-up health tests fail permanently. An intermittent start-up
+   --  failure is retried at the next oversampling rate, up to Max_OSR,
+   --  as jitterentropy does; Current_OSR tells which one passed.
    --
    --  OSR is the oversampling rate for this platform (see Min_OSR): the
    --  claim that each time delta carries at least 1/OSR bit of
@@ -196,9 +236,16 @@ is
    --  Generate random bytes.
    --  Output'Length can be any size; internally generates 32-byte
    --  blocks and truncates the last one.
-   --  Returns OK = False on health test failure; Output is then all
-   --  zero and the generator is latched off (Initialized cleared) until
-   --  Init is called again.
+   --
+   --  Health failures (see Health_Status): on an intermittent one the
+   --  pool is discarded, the start-up tests are re-run at the next
+   --  oversampling rate, and the request starts over, so the caller
+   --  sees OK = True and Last_Health = Intermittent. A second
+   --  intermittent failure within one request, a start-up retest that
+   --  does not pass, an oversampling rate already at Max_OSR, or a
+   --  permanent failure all latch the generator off: OK = False, Output
+   --  all zero, Initialized cleared until Init is called again. This is
+   --  the two-tier handling jitterentropy's validated deployments use.
    procedure Generate
      (State  : in out Entropy_State;
       Output : out Byte_Seq;

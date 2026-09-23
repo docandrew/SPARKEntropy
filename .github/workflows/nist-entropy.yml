@@ -8,14 +8,14 @@ on:
       - master
   workflow_dispatch:
     inputs:
-      bytes:
-        description: Number of entropy bytes to assess
+      osr:
+        description: Oversampling rate to validate against (min-entropy per delta must reach 1/OSR)
         required: true
-        default: "1048576"
-      min_bits_per_byte:
-        description: Minimum accepted assessed min-entropy
+        default: "3"
+      num_events:
+        description: Runtime deltas to record (SP 800-90B needs at least 1,000,000)
         required: true
-        default: "7.0"
+        default: "1000000"
 
 permissions:
   contents: read
@@ -34,8 +34,9 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@e50d5f73bfe71c2dd0aa4218de8f4afa59f8f81d # v16
 
-      - name: NIST SP 800-90B entropy assessment
+      - name: NIST SP 800-90B raw noise-source assessment (runtime + restart)
         env:
-          NIST_MIN_BITS_PER_BYTE: ${{ inputs.min_bits_per_byte || '7.0' }}
+          OSR: ${{ inputs.osr || '3' }}
+          NUM_EVENTS: ${{ inputs.num_events || '1000000' }}
           NIST_REF: 87c104d0ed4cbc96103e7b8b38d6f2c7e0a6b289
-        run: nix develop --command bash ci/nist_entropy.sh "${{ inputs.bytes || '1048576' }}"
+        run: nix develop --command bash ci/nist_entropy.sh

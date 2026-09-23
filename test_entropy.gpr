@@ -7,7 +7,7 @@ project Test_Entropy is
    --  test_keccak.adb removed: it KAT-tested the in-house SHAKE-256
    --  implementation we replaced with libkeccak. libkeccak ships
    --  upstream NIST KAT tests for SHAKE-256 in its own test suite.
-   for Main use ("test_entropy.adb", "dump_entropy.adb", "dump_restart.adb");
+   for Main use ("test_entropy.adb", "dump_entropy.adb", "dump_raw.adb");
 
    package Compiler is
       for Default_Switches ("Ada") use ("-g", "-gnatQ");

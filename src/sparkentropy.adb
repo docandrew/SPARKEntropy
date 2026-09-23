@@ -59,7 +59,8 @@ is
 
    procedure Init
      (State : in out Entropy_State;
-      OK    : out Boolean)
+      OK    : out Boolean;
+      OSR   : OSR_Range := Min_OSR)
    is
       Dt     : U64;
       Stuck  : Boolean;
@@ -67,7 +68,12 @@ is
       Deltas : array (0 .. Powerup_Loops - 1) of U64 := (others => 0);
       subtype Init_Counter is Natural range 0 .. Powerup_Loops;
       Stuck_Count : Init_Counter := 0;
-      Health_Fail : Boolean;
+      Status : Health_Status;
+      Retest : Boolean;
+      --  Start-up retries left (one per oversampling rate up to Max_OSR);
+      --  the loop variant, kept apart from State so callees cannot
+      --  disturb it.
+      Retries : Natural range 0 .. Max_OSR - Min_OSR := Max_OSR - OSR;
    begin
       --  State arrives default-initialized (every field has a
       --  declared default in the Entropy_State record); we update
@@ -75,6 +81,8 @@ is
       --  (others => <>) which SPARK forbids.
       OK := False;
       State.Initialized := False;
+      State.OSR := OSR;   --  before Reset_Health: the cutoffs scale with it
+      State.Last_Health := Healthy;
 
       --  Initialize sponge
       SHAKE.SHAKE256.Init (State.Pool);
@@ -97,23 +105,48 @@ is
          end if;
       end;
 
-      --  Power-up self-test: collect 1024 samples
-      --  Validates timer resolution and computes GCD
-      Health.Reset_Health (State);
-
-      for I in Deltas'Range loop
+      --  Power-up self-test: collect 1024 samples under the health tests.
+      --  Validates timer resolution and computes the GCD. An intermittent
+      --  health failure here is retried at the next oversampling rate,
+      --  as jitterentropy's start-up does; a permanent one, or reaching
+      --  Max_OSR, fails Init.
+      loop
          pragma Loop_Invariant
            (SHAKE.SHAKE256.State_Of (State.Pool) =
               SHAKE.SHAKE256.Updating);
-         Noise.Measure_Jitter (State, Dt, Stuck);
-         Health.Check_Health (State, Dt, Stuck, Health_Fail);
-         if Health_Fail then
+         pragma Loop_Variant (Decreases => Retries);
+         Health.Reset_Health (State);
+         Stuck_Count := 0;
+         Retest := False;
+         for I in Deltas'Range loop
+            pragma Loop_Invariant
+              (SHAKE.SHAKE256.State_Of (State.Pool) =
+                 SHAKE.SHAKE256.Updating);
+            Noise.Measure_Jitter (State, Dt, Stuck);
+            Health.Check_Health (State, Dt, Stuck, Status);
+            if Status = Permanent then
+               State.Last_Health := Permanent;
+               return;
+            elsif Status = Intermittent then
+               Retest := True;
+               exit;
+            end if;
+            Deltas (I) := Dt;
+            if Stuck and then Stuck_Count < Init_Counter'Last then
+               Stuck_Count := Stuck_Count + 1;
+            end if;
+         end loop;
+         exit when not Retest;
+         if Retries = 0 or else State.OSR = Max_OSR then
+            State.Last_Health := Permanent;
             return;
          end if;
-         Deltas (I) := Dt;
-         if Stuck and then Stuck_Count < Init_Counter'Last then
-            Stuck_Count := Stuck_Count + 1;
+         Retries := Retries - 1;
+         State.OSR := State.OSR + 1;
+         if State.Resets < Natural'Last then
+            State.Resets := State.Resets + 1;
          end if;
+         State.Last_Health := Intermittent;
       end loop;
 
       --  Check that not too many samples were stuck (< 90%)
@@ -132,7 +165,6 @@ is
       if G >= Unsigned_64'Last / 2 then
          return;
       end if;
-
       State.Timer_GCD := G;
 
       --  Check we have sufficient variation
@@ -153,7 +185,6 @@ is
       --  Reset health tests and sponge for real use
       Health.Reset_Health (State);
       SHAKE.SHAKE256.Init (State.Pool);
-
       State.Initialized := True;
       OK := True;
    end Init;
@@ -167,17 +198,28 @@ is
       Output : out Byte_Seq;
       OK     : out Boolean)
    is
-      --  Number of non-stuck samples needed per 256-bit block:
-      --  (256 + safety_factor) * OSR
-      Samples_Per_Block : constant Natural :=
-         (256 + Entropy_Safety_Factor) * State.OSR;
-
-      Pos         : Natural := Output'First;
+      Pos         : Natural;
       Block       : Byte_Seq (0 .. Block_Size - 1);
       Good_Count  : Natural;
-      Dt       : U64;
+      Dt          : U64;
       Stuck       : Boolean;
-      Health_Fail : Boolean;
+      Status      : Health_Status;
+      Restart     : Boolean;
+      Recovered   : Boolean := False;
+      Init_OK     : Boolean;
+      --  Recoveries left in this request: one. The loop variant; the
+      --  ghost snapshot lets the inner loops state how it moved.
+      Budget       : Natural range 0 .. 1 := 1;
+      Budget_Start : Natural range 0 .. 1 := 1 with Ghost;
+
+      --  Latch the generator off: nothing is handed back, and only a new
+      --  Init brings it back.
+      procedure Latch_Off is
+      begin
+         Output := (others => 0);
+         State.Initialized := False;
+         State.Last_Health := Permanent;
+      end Latch_Off;
    begin
       Output := (others => 0);
       OK := False;
@@ -186,56 +228,103 @@ is
          return;
       end if;
 
-      while Pos <= Output'Last loop
+      --  The request runs at most twice: once more after an intermittent
+      --  health failure has been recovered from.
+      loop
          pragma Loop_Invariant
            (SHAKE.SHAKE256.State_Of (State.Pool) =
               SHAKE.SHAKE256.Updating);
-         pragma Loop_Invariant (Pos >= Output'First and Pos <= Output'Last);
-         --  Collect enough non-stuck samples for one block
-         Good_Count := 0;
-         while Good_Count < Samples_Per_Block loop
+         pragma Loop_Variant (Decreases => Budget);
+         Restart := False;
+         Budget_Start := Budget;
+         Pos := Output'First;
+         Output := (others => 0);
+
+         while Pos <= Output'Last and then not Restart loop
             pragma Loop_Invariant
-           (SHAKE.SHAKE256.State_Of (State.Pool) =
-              SHAKE.SHAKE256.Updating);
-            Noise.Measure_Jitter (State, Dt, Stuck);
-            Health.Check_Health (State, Dt, Stuck, Health_Fail);
+              (SHAKE.SHAKE256.State_Of (State.Pool) =
+                 SHAKE.SHAKE256.Updating);
+            pragma Loop_Invariant (Pos >= Output'First and Pos <= Output'Last);
+            pragma Loop_Invariant (not Restart and Budget = Budget_Start);
 
-            if Health_Fail then
-               --  Health test failed: hand back no partial output and
-               --  latch the generator off until it is initialised again.
-               --  Output was zeroed on entry; the blocks copied so far
-               --  are overwritten here.
-               Output := (others => 0);
-               State.Initialized := False;
-               return;
-            end if;
+            --  Collect enough non-stuck samples for one block:
+            --  (256 + safety_factor) * OSR, read from State because a
+            --  recovery raises the rate.
+            Good_Count := 0;
+            while Good_Count < (256 + Entropy_Safety_Factor) * State.OSR
+              and then not Restart
+            loop
+               pragma Loop_Invariant
+                 (SHAKE.SHAKE256.State_Of (State.Pool) =
+                    SHAKE.SHAKE256.Updating);
+               pragma Loop_Invariant (not Restart and Budget = Budget_Start);
+               Noise.Measure_Jitter (State, Dt, Stuck);
+               Health.Check_Health (State, Dt, Stuck, Status);
 
-            if not Stuck then
-               Good_Count := Good_Count + 1;
+               case Status is
+                  when Healthy =>
+                     if not Stuck then
+                        Good_Count := Good_Count + 1;
+                     end if;
+
+                  when Intermittent =>
+                     --  SP 800-90B 4.3 intermittent failure (alpha 2^-30,
+                     --  expected now and then from a healthy source): as
+                     --  jitterentropy's reset does, discard the pool,
+                     --  re-run the start-up tests at the next oversampling
+                     --  rate, and start the request over. A second one in
+                     --  the same request, a rate already at Max_OSR, or a
+                     --  failed retest is treated as permanent.
+                     if Recovered or else Budget = 0 or else State.OSR = Max_OSR then
+                        Latch_Off;
+                        return;
+                     end if;
+                     Budget := Budget - 1;
+                     Init (State, Init_OK, State.OSR + 1);
+                     if not Init_OK then
+                        Latch_Off;
+                        return;
+                     end if;
+                     Recovered := True;
+                     if State.Resets < Natural'Last then
+                        State.Resets := State.Resets + 1;
+                     end if;
+                     State.Last_Health := Intermittent;
+                     Restart := True;
+
+                  when Permanent =>
+                     Latch_Off;
+                     return;
+               end case;
+            end loop;
+
+            pragma Assert (if Restart then Budget < Budget_Start else Budget = Budget_Start);
+            if not Restart then
+               --  Extract one block via SHAKE-256 squeeze.
+               --  Copy the pool, finalize the copy, squeeze output from it.
+               --  The original pool is preserved for continued absorption.
+               Squeeze_Block (State.Pool, Block);
+
+               --  Copy to output (may be partial for last block)
+               declare
+                  Remaining : constant Natural := Output'Last - Pos + 1;
+                  Copy_Len  : constant Natural :=
+                     Natural'Min (Block_Size, Remaining);
+               begin
+                  pragma Assert (Copy_Len <= Remaining);
+                  pragma Assert (Pos + Copy_Len - 1 <= Output'Last);
+                  Output (Pos .. Pos + Copy_Len - 1) :=
+                     Block (0 .. Copy_Len - 1);
+                  if Pos + Copy_Len > Output'Last then
+                     Pos := Output'Last + 1;  --  exits loop
+                  else
+                     Pos := Pos + Copy_Len;
+                  end if;
+               end;
             end if;
          end loop;
 
-         --  Extract one block via SHAKE-256 squeeze.
-         --  Copy the pool, finalize the copy, squeeze output from it.
-         --  The original pool is preserved for continued absorption.
-         Squeeze_Block (State.Pool, Block);
-
-         --  Copy to output (may be partial for last block)
-         declare
-            Remaining : constant Natural := Output'Last - Pos + 1;
-            Copy_Len  : constant Natural :=
-               Natural'Min (Block_Size, Remaining);
-         begin
-            pragma Assert (Copy_Len <= Remaining);
-            pragma Assert (Pos + Copy_Len - 1 <= Output'Last);
-            Output (Pos .. Pos + Copy_Len - 1) :=
-               Block (0 .. Copy_Len - 1);
-            if Pos + Copy_Len > Output'Last then
-               Pos := Output'Last + 1;  --  exits loop
-            else
-               Pos := Pos + Copy_Len;
-            end if;
-         end;
+         exit when not Restart;
       end loop;
 
       OK := True;

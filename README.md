@@ -55,111 +55,118 @@ You should see `Init OK` followed by five 32-byte hex dumps and
 
 ## NIST SP 800-90B entropy assessment
 
-`tests/dump_entropy.adb` writes a binary file of `Generate()` output
-that can be fed to NIST's
-[SP 800-90B EntropyAssessment](https://github.com/usnistgov/SP800-90B_EntropyAssessment)
-tools (`ea_iid`, `ea_non_iid`, `ea_restart`). See the `NIST` CI workflow for
-an example of how to run the assessment and interpret results.
+The assessment follows the procedure the ESV-validated
+[jitterentropy](https://github.com/smuellerDD/jitterentropy-library)
+library uses for its own validation (`tests/raw-entropy` there, and the
+"User Verification" section of its public-use validation documents):
+the noise source is assessed on its **raw time deltas**, recorded before
+any conditioning with the stuck indicator disregarded, and the pass mark
+is the entropy the generator credits to one delta, **1/OSR bits**. With
+`(256 + safety factor) * OSR` non-stuck deltas absorbed per 256-bit
+block, a noise source that meets that rate yields full-entropy output.
+The conditioned output is not what SP 800-90B assesses (Section 3.1.1
+asks for raw data), so it is not gated; `tests/dump_entropy.adb` remains
+for anyone who wants to look at it.
 
-### Building the NIST tools (Ubuntu/Debian)
-
-```
-sudo apt-get install libbz2-dev libdivsufsort-dev libjsoncpp-dev \
-                     libssl-dev libmpfr-dev libgmp-dev build-essential
-git clone https://github.com/usnistgov/SP800-90B_EntropyAssessment.git
-cd SP800-90B_EntropyAssessment/cpp && make
-```
-
-### Running the assessments
-
-From the `sparkentropy` directory:
-
-```shell
-alr exec -- gprbuild -P test_entropy.gpr
-./obj/tests/dump_entropy                      # writes 1 MB to entropy.bin
-$NIST/cpp/ea_iid     -i -a entropy.bin 8      # IID estimator
-$NIST/cpp/ea_non_iid -i -a entropy.bin 8      # non-IID (conservative) estimator
-```
-
-With Nix, the tool build and entropy assessment can be run as:
+`tests/dump_raw.adb` is the recorder (jitterentropy's
+`jitterentropy-hashtime` equivalent); `ci/nist_entropy.sh` runs the whole
+lane, and the hosted `NIST Entropy` workflow runs it on every pull
+request. With Nix:
 
 ```shell
 nix develop --command bash ci/nist_entropy.sh
 ```
 
-The reproducible assessment gate requires at least 1,000,000 bytes, passing
-IID statistical tests, and assessed IID/non-IID min-entropy of at least
-7.0 bits/byte by default. Override the threshold with
-`NIST_MIN_BITS_PER_BYTE` if needed.
+Steps, with the [SP 800-90B EntropyAssessment](https://github.com/usnistgov/SP800-90B_EntropyAssessment)
+tools at `$NIST`:
 
-`-i` is the initial entropy-estimation pass; `-a` reports all
-estimators; `8` is the symbol size in bits.
+```shell
+./obj/tests/dump_raw 1000000 1    raw-runtime   # 3.1.1 sequential dataset
+./obj/tests/dump_raw 1000    1000 raw-restart   # 3.1.4 restart dataset
+$NIST/cpp/ea_non_iid -i -a -v raw-runtime.lsb8 8
+$NIST/cpp/ea_restart -n -v raw-restart.lsb8 8 0.333   # H_I = 1/OSR
+```
+
+`.lsb8` holds the low 8 bits of every delta (jitterentropy's `extractlsb`
+with mask `FF:8`); `.u64` keeps the full deltas. Deltas are raw timer
+ticks: the recorder sets the timer GCD that `Init` measured to 1, as
+`jitterentropy-hashtime` does (`--counter-ticks` records the GCD-divided
+deltas the generator actually absorbs). The lane passes when the
+runtime `min(H_original, 8 X H_bitstring)` is at least `1/OSR`, the
+restart sanity check passes, and `min(H_r, H_c, H_I)` equals `H_I`, that
+is, no restart row or column falls below the claimed rate.
 
 ### Reference results
 
-Hardware: Linux 6.8 x86_64.  1 MB sample.
+Linux 6.8 x86_64, Ryzen 9 9950X3D (TSC step 43 ticks), OSR 3, 2026-09-22.
 
-**`ea_iid`:**
+**Runtime, `ea_non_iid` on 1,000,000 deltas:**
 
-| Estimator                    | Value (bits) |
-|------------------------------|--------------|
-| H_original                   | 7.881665     |
-| H_bitstring                  | 0.998626     |
-| min(H_original, 8·H_bitstring) | 7.881665   |
-| chi-square tests             | PASS         |
-| longest-repeated-substring   | PASS         |
-| IID permutation tests        | PASS         |
+| Estimator                        | Value (bits per delta) |
+|----------------------------------|------------------------|
+| H_original                       | 2.445842 |
+| H_bitstring                      | 0.281950 |
+| min(H_original, 8 X H_bitstring) | **2.255602** |
+| required (1/OSR)                 | 0.333333 |
 
-**`ea_non_iid`:**
+**Restart, `ea_restart` on 1000 x 1000 deltas:**
 
-| Estimator                    | Value (bits) |
-|------------------------------|--------------|
-| H_original                   | 7.349074     |
-| H_bitstring                  | 0.909275     |
-| min(H_original, 8·H_bitstring) | 7.274199   |
+| Quantity                    | Value |
+|-----------------------------|-------|
+| X_max (sanity check)        | 224 (cutoff 849) |
+| H_r (row min-entropy)       | 2.409826 |
+| H_c (column min-entropy)    | 2.459159 |
+| H_I (input, 1/OSR)          | 0.333000 |
+| Validation test             | PASS |
+| **min(H_r, H_c, H_I)**      | **0.333000** |
 
-Both estimators report `min` well above NIST's 0.5 bits/byte floor
-that's commonly used for accreditation, with the IID estimator
-within 0.12 bits of the 8.0 ideal and all three IID statistical
-tests passing.
+For comparison, jitterentropy's own `jitterentropy-hashtime` (library
+commit 7c65405, default settings, 256 KB memory block) recorded on the
+same machine minutes apart and assessed with the same tool gave
+H_original 2.950809, H_bitstring 0.349159, min 2.793271 bits per delta;
+its delta distribution (multiples of the 43-tick TSC step, about ten
+common values, median 16125 ticks) matches this crate's (median about
+18200 ticks). Recording takes a few seconds per set; the assessments a
+few minutes.
 
-### Restart test
+### Choosing the oversampling rate
 
-NIST SP 800-90B §3.1.4 also requires a **restart test**: 1000
-re-initializations of the noise source, each producing 1000
-samples, used to confirm that the entropy estimate is stable
-across restarts.
+`Init` takes an `OSR` argument (default `Min_OSR` = 3, maximum 20), the
+number of non-stuck deltas collected per output bit; the health-test
+cutoffs scale with it. On a platform whose runtime figure comes out below
+`1/OSR`, the lane prints the smallest admissible OSR; pass that value to
+`Init` there and validate with `OSR=<n>`. This is how jitterentropy's
+validated deployments are tuned: the certified operating environments
+carry their own OSR, chosen from the same measurement.
 
-`tests/dump_restart.adb` does this — call it once after building:
+Re-run the assessment after any change to `SPARKEntropy.Noise`,
+`SPARKEntropy.Health`, the timer, or the libkeccak version.
 
-```
-./obj/tests/dump_restart                 # writes 1,000,000 bytes to restart.bin
-$NIST/cpp/ea_restart -i restart.bin 8 7.27   # H_I = 7.27 from ea_non_iid
-```
+## Health tests and failure handling
 
-Reference run on the libkeccak swap (2026-04-29):
+Every delta passes the Repetition Count Test, the Adaptive Proportion
+Test and jitterentropy's lag predictor test before it counts. Each test
+has the two failure tiers SP 800-90B section 4.3 allows, with
+jitterentropy's cutoffs (RCT 30 x OSR and 60 x OSR; APT and lag
+predictor from its per-OSR tables), so the verdict of one delta is
+`Healthy`, `Intermittent` (false-positive probability 2^-30 per test,
+expected now and then from a healthy source) or `Permanent` (2^-60).
 
-| Quantity                        | Value     |
-|---------------------------------|-----------|
-| X_max (sanity check)            | 16  (cutoff: 24) |
-| H_r  (row min-entropy)          | 7.877522  |
-| H_c  (column min-entropy)       | 7.877522  |
-| H_I  (input)                    | 7.270000  |
-| IID statistical tests           | PASS      |
-| Restart validation test         | PASS      |
-| **min(H_r, H_c, H_I)**          | **7.270 bits/byte** |
+- Intermittent: `Generate` discards the pool, re-runs the 1024-sample
+  start-up tests at the next oversampling rate, and starts the request
+  over. The caller sees `OK = True`; `Last_Health` reports `Intermittent`
+  and `Intermittent_Resets` counts the recoveries. `Init` retries its
+  start-up the same way.
+- Permanent, a second intermittent failure in one request, a failed
+  retest, or an oversampling rate already at `Max_OSR`: the generator
+  latches off. `Generate` returns `OK = False` with an all-zero
+  `Output`, and only a new `Init` brings it back. A consumer that cannot
+  see the flag (SPARKTLS's `Random_Bytes_Fn`) detects the all-zero
+  output and reports it through `Config.On_Entropy_Failure`.
 
-The dump takes ~3 minutes wall-time (~1000 power-up self-tests at
-1024 samples each, plus 1000 × 1000 conditioned-output samples)
-and the assessment itself is a few seconds.
-
-### Reproducing results
-
-The `dump_entropy` binary is deterministic in size but not in
-content (each run reseeds from real CPU jitter).  Re-running the
-assessment after any code change in `SPARKEntropy.Noise`,
-`SPARKEntropy.Jitter_Permute`, or the libkeccak version is the
-recommended regression test for the noise source.
+This is the behaviour jitterentropy's ESV-validated deployments
+document: intermittent failures reset the source, permanent ones stop
+it.
 
 ## Formal verification
 

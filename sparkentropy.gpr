@@ -21,7 +21,11 @@ project SPARKEntropy is
    for Create_Missing_Dirs use "True";
 
    package Compiler is
+      --  No optimisation level is set here, so GCC's value-range propagation
+      --  does not run; -fno-tree-vrp keeps it off if one is ever added. GNAT
+      --  15.2 and 16.1 miscompile with it: measured 2026-09-24, SPARKNaCl's
+      --  SHA-256 gave a wrong digest for every input at -O2 without this flag.
       for Default_Switches ("Ada") use
-        ("-g", "-gnatwa", "-gnatQ", "-gnatw.X");
+        ("-g", "-gnatwa", "-gnatQ", "-gnatw.X", "-fno-tree-vrp");
    end Compiler;
 end SPARKEntropy;
